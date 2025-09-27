@@ -2,28 +2,184 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 自定义动画 */
+@keyframes blob {
+  0% { transform: translate(0px, 0px) scale(1); }
+  33% { transform: translate(30px, -50px) scale(1.1); }
+  66% { transform: translate(-20px, 20px) scale(0.9); }
+  100% { transform: translate(0px, 0px) scale(1); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-20px); }
+}
+
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(139, 92, 246, 0.3); }
+  50% { box-shadow: 0 0 40px rgba(139, 92, 246, 0.6); }
+}
+
+.animate-blob {
+  animation: blob 7s infinite;
+}
+
+.animation-delay-2000 {
+  animation-delay: 2s;
+}
+
+.animation-delay-4000 {
+  animation-delay: 4s;
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-glow {
+  animation: glow 2s ease-in-out infinite alternate;
+}
+
+/* 网格背景 */
+.bg-grid-pattern {
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+  background-size: 50px 50px;
+}
+
 /* 自定义组件样式 */
 .card {
-  @apply max-w-4xl mx-auto bg-white border border-gray-200 rounded-xl shadow-sm p-6 md:p-8;
+  @apply max-w-5xl mx-auto backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-2xl p-8 md:p-10;
 }
+
 .btn {
-  @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 disabled:opacity-60 disabled:cursor-not-allowed transition;
+  @apply inline-flex items-center justify-center gap-3 px-6 py-3 rounded-xl font-medium transition-all duration-300 transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none;
 }
+
 .btn-primary {
-  @apply bg-brand-600 text-white border-brand-600 hover:bg-brand-700 hover:border-brand-700;
+  @apply bg-gradient-to-r from-blue-500 to-purple-600 text-white border-0 shadow-lg shadow-blue-500/30 hover:shadow-xl hover:shadow-blue-500/40 hover:from-blue-600 hover:to-purple-700;
 }
+
+.btn-secondary {
+  @apply bg-white/10 text-white border border-white/30 backdrop-blur-sm hover:bg-white/20 hover:border-white/40 shadow-lg;
+}
+
 .input {
-  @apply w-full min-w-0 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500;
+  @apply w-full min-w-0 px-4 py-3 bg-white/10 border border-white/30 rounded-xl text-white placeholder-gray-300 backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 focus:bg-white/15 transition-all duration-300;
 }
+
+.input::placeholder {
+  @apply text-gray-400;
+}
+
+.input:focus {
+  @apply shadow-lg shadow-blue-500/20;
+}
+
 .label {
-  @apply w-28 text-gray-600;
+  @apply w-32 text-gray-200 font-medium;
 }
+
 .row {
-  @apply flex flex-wrap items-center gap-3 mb-3;
+  @apply flex flex-wrap items-center gap-4 mb-6;
 }
+
 .textarea {
-  @apply w-full h-96 p-3 border border-gray-300 rounded-lg font-mono text-sm;
+  @apply w-full h-96 p-4 bg-white/10 border border-white/30 rounded-xl font-mono text-sm text-white placeholder-gray-300 backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 focus:bg-white/15 transition-all duration-300 resize-none;
 }
+
+.textarea:focus {
+  @apply shadow-lg shadow-blue-500/20;
+}
+
 .badge {
-  @apply text-xs text-gray-500;
+  @apply inline-flex items-center gap-2 px-4 py-2 bg-white/10 backdrop-blur-sm rounded-full text-sm text-gray-200 border border-white/20;
+}
+
+.file-upload {
+  @apply relative overflow-hidden cursor-pointer;
+}
+
+.file-upload input[type="file"] {
+  @apply absolute inset-0 w-full h-full opacity-0 cursor-pointer;
+}
+
+.file-upload-content {
+  @apply flex items-center justify-center gap-3 px-6 py-4 bg-white/10 border-2 border-dashed border-white/30 rounded-xl text-gray-300 hover:bg-white/15 hover:border-white/40 transition-all duration-300;
+}
+
+.progress-bar {
+  @apply w-full h-2 bg-white/20 rounded-full overflow-hidden;
+}
+
+.progress-fill {
+  @apply h-full bg-gradient-to-r from-blue-500 to-purple-600 rounded-full transition-all duration-300;
+}
+
+/* 选择框样式 - 统一优化版本 */
+select.input {
+  @apply appearance-none cursor-pointer;
+  background: rgba(255, 255, 255, 0.15) !important;
+  backdrop-filter: blur(15px) saturate(150%);
+  -webkit-backdrop-filter: blur(15px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%23ffffff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m6 8 4 4 4-4'/%3e%3c/svg%3e");
+  background-position: right 0.75rem center;
+  background-repeat: no-repeat;
+  background-size: 1.5em 1.5em;
+  padding-right: 2.5rem;
+}
+
+select.input:focus {
+  backdrop-filter: blur(25px) saturate(180%);
+  -webkit-backdrop-filter: blur(25px) saturate(180%);
+  background: rgba(255, 255, 255, 0.25) !important;
+  border-color: rgba(59, 130, 246, 0.6) !important;
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.3) !important;
+}
+
+/* 选择框选项样式 - 深色背景高对比度 */
+select.input option {
+  background-color: #1e293b !important;
+  color: #ffffff !important;
+  padding: 12px 16px !important;
+  font-weight: 500 !important;
+  border: none !important;
+}
+
+select.input option:hover {
+  background-color: #334155 !important;
+}
+
+select.input option:checked,
+select.input option:focus,
+select.input option:active {
+  background-color: #2563eb !important;
+  color: #ffffff !important;
+}
+
+/* 滚动条样式 */
+.textarea::-webkit-scrollbar {
+  width: 8px;
+}
+
+.textarea::-webkit-scrollbar-track {
+  @apply bg-white/10 rounded-lg;
+}
+
+.textarea::-webkit-scrollbar-thumb {
+  @apply bg-white/30 rounded-lg hover:bg-white/40;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+  .row {
+    @apply flex-col items-stretch gap-3;
+  }
+  
+  .label {
+    @apply w-full text-left;
+  }
 }
