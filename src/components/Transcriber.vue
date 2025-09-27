@@ -168,7 +168,7 @@
 <script setup>
 import { ref, computed, onMounted } from "vue";
 import { GoogleGenAI, createUserContent, createPartFromUri } from "@google/genai";
-import { transcodeToMp316kMono, setProgressCallback, getCacheStatus } from "../lib/transcode";
+import { transcodeToMp316kMono, setProgressCallback, getCacheStatus, preloadFFmpeg } from "../lib/transcode";
 
 const apiKey = ref("");
 const file = ref(null);
@@ -176,15 +176,41 @@ const fileDuration = ref(null);
 const srt = ref("");
 const status = ref("");
 const loading = ref(false);
-const progress = ref(0);
 const showApiKey = ref(false);
 
 const LS_KEY = "genai_api_key";
-onMounted(() => {
+onMounted(async () => {
   try {
     const saved = localStorage.getItem(LS_KEY);
     if (saved) apiKey.value = saved;
   } catch {}
+  
+  // 预加载 FFmpeg
+  try {
+    // 先检查缓存状态
+    const cacheStatus = await getCacheStatus();
+    
+    if (cacheStatus.isFullyCached) {
+      // 如果已有完整缓存，静默预加载，不显示状态
+      await preloadFFmpeg();
+      console.log('FFmpeg 从缓存加载完成');
+    } else {
+      // 如果需要下载，显示预加载状态
+      status.value = "正在预加载 FFmpeg（首次下载）...";
+      await preloadFFmpeg();
+      status.value = "FFmpeg 预加载完成 ✨";
+      
+      // 3秒后清除状态信息
+      setTimeout(() => {
+        if (status.value === "FFmpeg 预加载完成 ✨") {
+          status.value = "";
+        }
+      }, 3000);
+    }
+  } catch (error) {
+    console.warn('FFmpeg 预加载失败:', error);
+    status.value = "";
+  }
 });
 
 // 模型选择：内置三种 + 自定义
@@ -292,26 +318,53 @@ async function onFileChange(e) {
   
   // 获取文件时长信息（如果是音视频文件）
   if (f.type.startsWith('audio/') || f.type.startsWith('video/')) {
-    if (cacheStatus.isFullyCached) {
-      // 如果有缓存，直接尝试获取时长
+    try {
       const url = URL.createObjectURL(f);
-      const media = document.createElement(f.type.startsWith('video/') ? 'video' : 'audio');
-      media.src = url;
-      media.onloadedmetadata = () => {
+      const media = document.createElement('audio'); // 统一使用 audio 元素
+      
+      // 设置媒体元素属性
+      media.preload = 'metadata';
+      media.muted = true; // 静音避免播放声音
+      
+      // 设置超时处理
+      const timeout = setTimeout(() => {
+        cleanup();
         if (file.value === f) {
-          fileDuration.value = media.duration;
+          fileDuration.value = null;
         }
+      }, 3000); // 减少到3秒超时
+      
+      const cleanup = () => {
+        clearTimeout(timeout);
+        media.removeAttribute('src');
+        media.load(); // 清空媒体元素
         URL.revokeObjectURL(url);
       };
+      
+      media.onloadedmetadata = () => {
+        if (file.value === f && media.duration && isFinite(media.duration)) {
+          fileDuration.value = media.duration;
+        } else {
+          fileDuration.value = null;
+        }
+        cleanup();
+      };
+      
       media.onerror = () => {
         if (file.value === f) {
           fileDuration.value = null;
         }
-        URL.revokeObjectURL(url);
+        cleanup();
       };
-    } else {
-      // 如果没有缓存，设置为未知时长
-      fileDuration.value = null;
+      
+      // 设置 src 触发加载
+      media.src = url;
+      
+    } catch (error) {
+      console.warn('获取文件时长失败:', error);
+      if (file.value === f) {
+        fileDuration.value = null;
+      }
     }
   }
 }
@@ -337,40 +390,25 @@ async function transcribe() {
     // 设置进度回调
     setProgressCallback((progressText) => {
       status.value = progressText;
-      // 模拟进度更新
-      if (progressText.includes('加载')) {
-        progress.value = 10;
-      } else if (progressText.includes('转码')) {
-        progress.value = 30;
-      } else if (progressText.includes('上传')) {
-        progress.value = 60;
-      } else if (progressText.includes('转录')) {
-        progress.value = 80;
-      }
     });
 
     // 检查 IndexedDB 缓存状态
     const cacheStatus = await getCacheStatus();
     
     // 先在本地将媒体转码为 16kbps 单声道 MP3
-    if (cacheStatus.isFullyCached) {
-      status.value = "正在加载 FFmpeg 核心文件（使用缓存）...";
-    } else {
-      status.value = "正在加载 FFmpeg 核心文件（首次下载可能耗时较长）...";
-    }
     const { blob, name, mime } = await transcodeToMp316kMono(file.value);
     const mp3File = new File([blob], name, { type: mime });
 
     const ai = new GoogleGenAI({ apiKey: apiKey.value });
 
-    status.value = "音频上传...";
+    status.value = "音频上传 Gemini...";
 
     const uploaded = await ai.files.upload({
       file: mp3File,
       config: { mimeType: mp3File.type || "audio/mpeg" },
     });
 
-    status.value = "请求转录...";
+    status.value = "Gemini 转录...";
     const prompt =
       "Transcribe the audio. Split at natural phrase boundaries. Each line should not contain more than 15 words. " +
       "Each segment duration should not exceed 6 seconds. " +
@@ -388,14 +426,13 @@ async function transcribe() {
     const text = (result && result.text) ? result.text : "";
     srt.value = toSRT(text.trim());
     status.value = srt.value ? "转录完成 ✨" : "转录完成，但未获得文本";
-    progress.value = 100;
   } catch (err) {
     console.error(err);
     status.value = "出错：" + (err?.message || String(err));
   } finally {
     loading.value = false;
     setTimeout(() => {
-      progress.value = 0;
+      status.value = "";
     }, 2000);
   }
 }
