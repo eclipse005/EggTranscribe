@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 自定义组件样式 */
+.card {
+  @apply max-w-4xl mx-auto bg-white border border-gray-200 rounded-xl shadow-sm p-6 md:p-8;
+}
+.btn {
+  @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 disabled:opacity-60 disabled:cursor-not-allowed transition;
+}
+.btn-primary {
+  @apply bg-brand-600 text-white border-brand-600 hover:bg-brand-700 hover:border-brand-700;
+}
+.input {
+  @apply w-full min-w-0 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500;
+}
+.label {
+  @apply w-28 text-gray-600;
+}
+.row {
+  @apply flex flex-wrap items-center gap-3 mb-3;
+}
+.textarea {
+  @apply w-full h-96 p-3 border border-gray-300 rounded-lg font-mono text-sm;
+}
+.badge {
+  @apply text-xs text-gray-500;
+}
