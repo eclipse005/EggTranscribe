@@ -176,40 +176,67 @@ export function useTranscription() {
             new File([segmentBlob], `segment_${index + 1}.mp3`, { type: 'audio/mpeg' })
           );
 
+      // 重试函数，支持指数退避
+      const retryWithBackoff = async (fn, maxRetries = 4, baseDelay = 2000) => {
+        let lastError;
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          try {
+            return await fn();
+          } catch (error) {
+            lastError = error;
+            if (attempt < maxRetries) {
+              const delay = baseDelay * Math.pow(2, attempt); // 2, 4, 8, 16 秒
+              await new Promise(resolve => setTimeout(resolve, delay));
+            }
+          }
+        }
+        throw lastError;
+      };
+
       // 4. 上传并转录每个音频片段
       const transcriptionResults = [];
       const prompt = "Transcribe the audio. Split at natural phrase boundaries. Each line should not contain more than 15 words. " +
-        "Each segment duration should not exceed 6 seconds. " +
         "Output with start and end timestamps. " +
         "For example: [00:00:00:500-00:00:02:000] Hello, this is a test.";
 
       for (let i = 0; i < audioSegments.length; i++) {
         const segmentFile = audioSegments[i];
         
-        status.value = `正在上传第 ${i + 1}/${audioSegments.length} 个片段到 Gemini...`;
-        
-        const uploaded = await ai.files.upload({
-          file: segmentFile,
-          config: { mimeType: segmentFile.type || "audio/mpeg" },
-        });
+        try {
+          // 上传步骤，带重试
+          status.value = `正在上传第 ${i + 1}/${audioSegments.length} 个片段到 Gemini...`;
+          
+          const uploaded = await retryWithBackoff(async () => {
+            return await ai.files.upload({
+              file: segmentFile,
+              config: { mimeType: segmentFile.type || "audio/mpeg" },
+            });
+          });
 
-        status.value = `正在转录第 ${i + 1}/${audioSegments.length} 个片段...`;
-        
-        const result = await ai.models.generateContent({
-          model: effectiveModel.value,
-          contents: createUserContent([
-            createPartFromUri(uploaded.uri, uploaded.mimeType),
-            prompt,
-          ]),
-        });
+          // 转录步骤，带重试
+          status.value = `正在转录第 ${i + 1}/${audioSegments.length} 个片段...`;
+          
+          const result = await retryWithBackoff(async () => {
+            return await ai.models.generateContent({
+              model: effectiveModel.value,
+              contents: createUserContent([
+                createPartFromUri(uploaded.uri, uploaded.mimeType),
+                prompt,
+              ]),
+            });
+          });
 
-        const text = (result && result.text) ? result.text.trim() : "";
-        
-        transcriptionResults.push({
-          text,
-          segmentIndex: i,
-          rawResult: text
-        });
+          const text = (result && result.text) ? result.text.trim() : "";
+          
+          transcriptionResults.push({
+            text,
+            segmentIndex: i,
+            rawResult: text
+          });
+        } catch (error) {
+          console.error(`处理第 ${i + 1} 个片段时出错:`, error);
+          throw new Error(`处理第 ${i + 1} 个片段失败: ${error.message}`);
+        }
       }
 
       // 5. 处理转录结果 - 使用字幕处理工具类

@@ -198,72 +198,6 @@ class FFmpegUtils {
     return await ffmpeg.readFile(filename);
   }
 
-  /**
-   * 检测音频中的静音片段
-   */
-  async detectSilence(audioFile, options = {}) {
-    const {
-      silenceThreshold = -30,    // 静音阈值（dB）
-      minSilenceDuration = 0.5   // 最小静音时长（秒）
-    } = options;
-
-    const ffmpeg = await this.getFFmpeg();
-    // 在此操作期间绑定当前的进度回调
-    this._bindProgressCallback(ffmpeg);
-    
-    const inputFilename = `silence_input.${this.getFileExtension(audioFile.name)}`;
-    
-    try {
-      await ffmpeg.writeFile(inputFilename, new Uint8Array(await audioFile.arrayBuffer()));
-      
-      // 使用 silencedetect 滤镜检测静音
-      await ffmpeg.exec([
-        '-i', inputFilename,
-        '-af', `silencedetect=noise=${silenceThreshold}dB:duration=${minSilenceDuration}`,
-        '-f', 'null', '-'
-      ]);
-      
-      // 从 FFmpeg 日志中解析静音信息
-      // 注意：这里需要从 FFmpeg 的 stderr 输出中解析，实际实现可能需要调整
-      return []; // 临时返回空数组，实际需要解析
-      
-    } finally {
-      await this.cleanup([inputFilename]);
-      // 操作完成后，重新绑定当前的全局回调
-      this._bindProgressCallback(ffmpeg);
-    }
-  }
-
-  /**
-   * 获取音频时长
-   */
-  async getAudioDuration(audioFile) {
-    const ffmpeg = await this.getFFmpeg();
-    // 在此操作期间绑定当前的进度回调
-    this._bindProgressCallback(ffmpeg);
-    
-    const inputFilename = `duration_input.${this.getFileExtension(audioFile.name)}`;
-    
-    try {
-      await ffmpeg.writeFile(inputFilename, new Uint8Array(await audioFile.arrayBuffer()));
-      
-      // 使用 ffprobe 获取时长信息
-      await ffmpeg.exec([
-        '-i', inputFilename,
-        '-f', 'null', '-'
-      ]);
-      
-      // 从输出中解析时长，这里简化处理
-      // 实际需要从 FFmpeg 输出中解析 Duration 信息
-      return 0; // 临时返回，实际需要解析
-      
-    } finally {
-      await this.cleanup([inputFilename]);
-      // 操作完成后，重新绑定当前的全局回调
-      this._bindProgressCallback(ffmpeg);
-    }
-  }
-
   /** 
    * 智能切割音频（基于静音检测）
    */
@@ -405,16 +339,34 @@ class FFmpegUtils {
       ]);
 
       // 对片段进行静音检测
+      let silenceOutput = '';
+      
+      // 临时监听 FFmpeg 的日志输出
+      if (ffmpeg.on) {
+        ffmpeg.on('log', ({ message }) => {
+          silenceOutput += message + '\n';
+        });
+      }
+      
       await ffmpeg.exec([
         '-i', tempOutput,
         '-af', `silencedetect=noise=${options.silenceThreshold}dB:duration=${options.minSilenceDuration}`,
         '-f', 'null', '-'
       ]);
 
-      // 简化处理：如果在范围中间附近，认为找到了合适的切割点
-      // 实际应该解析 FFmpeg 输出来找到真正的静音点
-      const midPoint = (startTime + endTime) / 2;
-      return midPoint;
+      // 解析静音检测结果
+      const silencePoints = this.parseSilenceOutput(silenceOutput);
+      
+      // 寻找最佳切割点（静音片段的中点）
+      const bestCutPoint = this.findBestCutPoint(silencePoints, startTime, endTime);
+      
+      if (bestCutPoint !== null) {
+        return bestCutPoint;
+      } else {
+        // 如果没找到合适的静音点，使用中点
+        const midPoint = (startTime + endTime) / 2;
+        return midPoint;
+      }
 
     } catch (error) {
       // 检测失败，返回 null
@@ -426,6 +378,78 @@ class FFmpegUtils {
       // 重新绑定以应用恢复的设置
       this._bindProgressCallback(ffmpeg);
     }
+  }
+
+  /**
+   * 解析 FFmpeg 静音检测输出
+   */
+  parseSilenceOutput(output) {
+    const silenceSegments = [];
+    const lines = output.split('\n');
+    
+    let currentSilence = null;
+    
+    for (const line of lines) {
+      // 匹配静音开始: [silencedetect @ 0xe29380] silence_start: 1.56212
+      const startMatch = line.match(/silence_start:\s*([\d.]+)/);
+      if (startMatch) {
+        currentSilence = {
+          start: parseFloat(startMatch[1]),
+          end: null,
+          duration: null
+        };
+        continue;
+      }
+      
+      // 匹配静音结束: [silencedetect @ 0xe29380] silence_end: 2.38469 | silence_duration: 0.822562
+      const endMatch = line.match(/silence_end:\s*([\d.]+).*silence_duration:\s*([\d.]+)/);
+      if (endMatch && currentSilence) {
+        currentSilence.end = parseFloat(endMatch[1]);
+        currentSilence.duration = parseFloat(endMatch[2]);
+        silenceSegments.push(currentSilence);
+        currentSilence = null;
+      }
+    }
+    
+    return silenceSegments;
+  }
+
+  /**
+   * 寻找最佳切割点（在静音片段中）
+   */
+  findBestCutPoint(silenceSegments, searchStart, searchEnd) {
+    if (!silenceSegments || silenceSegments.length === 0) {
+      return null;
+    }
+    
+    // 将静音片段的相对时间转换为原始音频的绝对时间
+    const absoluteSilences = silenceSegments.map(silence => ({
+      start: silence.start + searchStart,  // 相对时间 + 搜索起始时间 = 绝对时间
+      end: silence.end + searchStart,
+      duration: silence.duration,
+      relativeStart: silence.start,
+      relativeEnd: silence.end
+    }));
+    
+    // 寻找在搜索范围内的静音片段（使用绝对时间）
+    const validSilences = absoluteSilences.filter(silence => {
+      const silenceCenter = (silence.start + silence.end) / 2;
+      return silenceCenter >= searchStart && silenceCenter <= searchEnd;
+    });
+    
+    if (validSilences.length === 0) {
+      return null;
+    }
+    
+    // 选择最长的静音片段作为最佳切割点
+    const bestSilence = validSilences.reduce((best, current) => {
+      return current.duration > best.duration ? current : best;
+    });
+    
+    console.log(`🎯 选择最佳静音片段: ${bestSilence.start.toFixed(2)}s-${bestSilence.end.toFixed(2)}s (时长: ${bestSilence.duration.toFixed(2)}s)`);
+    
+    // 返回静音片段的中点作为切割点（绝对时间）
+    return (bestSilence.start + bestSilence.end) / 2;
   }
 
   /**
