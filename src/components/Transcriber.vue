@@ -159,7 +159,6 @@
         class="textarea animate-glow" 
         v-model="srt" 
         placeholder="转录结果将在这里显示...&#10;&#10;支持的格式：&#10;• 音频文件：MP3, WAV, M4A, AAC 等&#10;• 视频文件：MP4, AVI, MOV, MKV 等&#10;&#10;转录完成后可直接下载 SRT 字幕文件"
-        readonly
       ></textarea>
     </div>
   </div>
