@@ -3,6 +3,7 @@ import vue from '@vitejs/plugin-vue'
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: '/EggTranscribe/',
   plugins: [vue()],
   server: {
     // 优化静态资源服务
