@@ -29,3 +29,23 @@ export async function preloadFFmpeg() {
 export async function transcodeToMp316kMono(inputFile) {
   return await ffmpegUtils.transcodeToMp316kMono(inputFile);
 }
+
+/**
+ * 智能切割音频（基于静音检测，适用于长音频）
+ * @param {File|Blob} inputFile
+ * @param {Object} options - 切割选项
+ * @returns {Promise<{ segments: Blob[], timeMap: number[], needsSplit: boolean }>}
+ */
+export async function splitAudioBySilence(inputFile, options = {}) {
+  return await ffmpegUtils.splitAudioBySilence(inputFile, options);
+}
+
+/**
+ * 调整时间戳（根据音频切割后的时间映射）
+ * @param {Array} timestamps - 原始时间戳数组
+ * @param {Array} timeMap - 切割点时间映射
+ * @returns {Array} 调整后的时间戳信息
+ */
+export function adjustTimestamps(timestamps, timeMap) {
+  return ffmpegUtils.adjustTimestamps(timestamps, timeMap);
+}

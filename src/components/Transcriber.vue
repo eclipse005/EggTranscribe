@@ -166,9 +166,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { GoogleGenAI, createUserContent, createPartFromUri } from "@google/genai";
-import { transcodeToMp316kMono, setProgressCallback, getCacheStatus, preloadFFmpeg } from "../lib/transcode";
+import { transcodeToMp316kMono, splitAudioBySilence, setProgressCallback, getCacheStatus, preloadFFmpeg } from "../lib/transcode";
 
 const apiKey = ref("");
 const file = ref(null);
@@ -177,6 +177,10 @@ const srt = ref("");
 const status = ref("");
 const loading = ref(false);
 const showApiKey = ref(false);
+const statusTimeoutId = ref(null); // 用于清理状态定时器
+const mediaTimeoutId = ref(null);  // 用于清理媒体时长获取定时器
+
+
 
 const LS_KEY = "genai_api_key";
 onMounted(async () => {
@@ -193,7 +197,6 @@ onMounted(async () => {
     if (cacheStatus.isFullyCached) {
       // 如果已有完整缓存，静默预加载，不显示状态
       await preloadFFmpeg();
-      console.log('FFmpeg 从缓存加载完成');
     } else {
       // 如果需要下载，显示预加载状态
       status.value = "正在预加载 FFmpeg（首次下载）...";
@@ -201,15 +204,33 @@ onMounted(async () => {
       status.value = "FFmpeg 预加载完成 ✨";
       
       // 3秒后清除状态信息
-      setTimeout(() => {
+      if (statusTimeoutId.value) {
+        clearTimeout(statusTimeoutId.value);
+      }
+      statusTimeoutId.value = setTimeout(() => {
         if (status.value === "FFmpeg 预加载完成 ✨") {
           status.value = "";
         }
+        statusTimeoutId.value = null;
       }, 3000);
     }
   } catch (error) {
     console.warn('FFmpeg 预加载失败:', error);
     status.value = "";
+  }
+});
+
+// 组件卸载时清理定时器
+onUnmounted(() => {
+  // 清理 FFmpeg 状态定时器
+  if (statusTimeoutId.value) {
+    clearTimeout(statusTimeoutId.value);
+    statusTimeoutId.value = null;
+  }
+  // 清理媒体时长获取定时器
+  if (mediaTimeoutId.value) {
+    clearTimeout(mediaTimeoutId.value);
+    mediaTimeoutId.value = null;
   }
 });
 
@@ -307,27 +328,24 @@ async function onFileChange(e) {
   
   if (!f) return;
   
-  // 检查 FFmpeg 缓存状态
-  let cacheStatus;
-  try {
-    cacheStatus = await getCacheStatus();
-  } catch (error) {
-    console.warn('无法检查缓存状态:', error);
-    cacheStatus = { isFullyCached: false };
-  }
-  
   // 获取文件时长信息（如果是音视频文件）
   if (f.type.startsWith('audio/') || f.type.startsWith('video/')) {
     try {
       const url = URL.createObjectURL(f);
       const media = document.createElement('audio'); // 统一使用 audio 元素
       
+      // 清理之前的定时器
+      if (mediaTimeoutId.value) {
+        clearTimeout(mediaTimeoutId.value);
+        mediaTimeoutId.value = null;
+      }
+      
       // 设置媒体元素属性
       media.preload = 'metadata';
       media.muted = true; // 静音避免播放声音
       
       // 设置超时处理
-      const timeout = setTimeout(() => {
+      mediaTimeoutId.value = setTimeout(() => {
         cleanup();
         if (file.value === f) {
           fileDuration.value = null;
@@ -335,7 +353,12 @@ async function onFileChange(e) {
       }, 3000); // 减少到3秒超时
       
       const cleanup = () => {
-        clearTimeout(timeout);
+        if (mediaTimeoutId.value) {
+          clearTimeout(mediaTimeoutId.value);
+          mediaTimeoutId.value = null;
+        }
+        media.onloadedmetadata = null;
+        media.onerror = null;
         media.removeAttribute('src');
         media.load(); // 清空媒体元素
         URL.revokeObjectURL(url);
@@ -392,49 +415,190 @@ async function transcribe() {
       status.value = progressText;
     });
 
-    // 检查 IndexedDB 缓存状态
-    const cacheStatus = await getCacheStatus();
-    
-    // 先在本地将媒体转码为 16kbps 单声道 MP3
-    const { blob, name, mime } = await transcodeToMp316kMono(file.value);
-    const mp3File = new File([blob], name, { type: mime });
-
     const ai = new GoogleGenAI({ apiKey: apiKey.value });
 
-    status.value = "音频上传 Gemini...";
+    // 1. 先转码为 Gemini 需要的格式
+    status.value = "正在转码音频...";
+    const { blob, name, mime } = await transcodeToMp316kMono(file.value);
+    const transcodedFile = new File([blob], name, { type: mime });
 
-    const uploaded = await ai.files.upload({
-      file: mp3File,
-      config: { mimeType: mp3File.type || "audio/mpeg" },
+    // 2. 对转码后的音频进行智能切割
+    const splitResult = await splitAudioBySilence(transcodedFile, {
+      segmentDuration: 300,     // 5分钟切割
+      searchRange: 30,          // 前后30秒搜索范围
+      silenceThreshold: -30,    // -30dB静音阈值
+      minSilenceDuration: 0.5   // 最小0.5秒静音
     });
 
-    status.value = "Gemini 转录...";
-    const prompt =
-      "Transcribe the audio. Split at natural phrase boundaries. Each line should not contain more than 15 words. " +
+    
+
+    // 3. 准备音频片段（短音频1个片段，长音频多个片段）
+    const audioSegments = !splitResult.needsSplit 
+      ? [transcodedFile] 
+      : splitResult.segments.map((segmentBlob, index) => 
+          new File([segmentBlob], `segment_${index + 1}.mp3`, { type: 'audio/mpeg' })
+        );
+
+    // 4. 上传并转录每个音频片段
+    const transcriptionResults = [];
+    const prompt = "Transcribe the audio. Split at natural phrase boundaries. Each line should not contain more than 15 words. " +
       "Each segment duration should not exceed 6 seconds. " +
       "Output with start and end timestamps. " +
       "For example: [00:00:00:500-00:00:02:000] Hello, this is a test.";
 
-    const result = await ai.models.generateContent({
-      model: effectiveModel.value,
-      contents: createUserContent([
-        createPartFromUri(uploaded.uri, uploaded.mimeType),
-        prompt,
-      ]),
-    });
+    for (let i = 0; i < audioSegments.length; i++) {
+      const segmentFile = audioSegments[i];
+      
+      status.value = `正在上传第 ${i + 1}/${audioSegments.length} 个片段到 Gemini...`;
+      
+      const uploaded = await ai.files.upload({
+        file: segmentFile,
+        config: { mimeType: segmentFile.type || "audio/mpeg" },
+      });
 
-    const text = (result && result.text) ? result.text : "";
-    srt.value = toSRT(text.trim());
+      status.value = `正在转录第 ${i + 1}/${audioSegments.length} 个片段...`;
+      
+      const result = await ai.models.generateContent({
+        model: effectiveModel.value,
+        contents: createUserContent([
+          createPartFromUri(uploaded.uri, uploaded.mimeType),
+          prompt,
+        ]),
+      });
+
+      const text = (result && result.text) ? result.text.trim() : "";
+      
+      
+      
+      transcriptionResults.push({
+        text,
+        segmentIndex: i,
+        rawResult: text
+      });
+    }
+
+    // 4. 处理转录结果 - 统一处理逻辑，无论是短音频还是长音频
+    status.value = "正在合并转录结果...";
+    
+    const adjustedRawTexts = []; // 存储调整时间戳后的原始文本
+    const timeMap = splitResult.timeMap;
+    
+    // 按顺序处理每个片段，直接在原始文本上调整时间戳（包括只有1个片段的短音频）
+    for (let segmentIndex = 0; segmentIndex < transcriptionResults.length; segmentIndex++) {
+      const result = transcriptionResults[segmentIndex];
+      if (!result.text) continue;
+      
+      // 直接在原始文本上调整时间戳（短音频偏移为0，长音频按实际偏移）
+      const segmentStartTime = timeMap[segmentIndex] || 0;
+      const adjustedText = adjustTimestampsInRawText(result.text, segmentStartTime);
+      
+      adjustedRawTexts.push(adjustedText);
+    }
+    
+    // 合并所有调整后的原始文本
+    const combinedRawText = adjustedRawTexts.join('\n');
+    
+    // 最后统一转换为 SRT 格式
+    const finalSrt = toSRT(combinedRawText);
+
+    srt.value = finalSrt;
     status.value = srt.value ? "转录完成 ✨" : "转录完成，但未获得文本";
+    
   } catch (err) {
     console.error(err);
     status.value = "出错：" + (err?.message || String(err));
   } finally {
     loading.value = false;
-    setTimeout(() => {
+    // 清理之前的状态定时器
+    if (statusTimeoutId.value) {
+      clearTimeout(statusTimeoutId.value);
+    }
+    // 添加新的状态清理定时器
+    statusTimeoutId.value = setTimeout(() => {
       status.value = "";
+      statusTimeoutId.value = null;
     }, 2000);
   }
+}
+
+// 辅助函数：调整原始文本格式中的时间戳
+function adjustTimestampsInRawText(rawText, offsetSeconds) {
+  if (!rawText) return rawText;
+  
+  // 匹配格式：[ 00:56:557-00:59:777 ] 或 [00:56:557-00:59:777] 的时间戳模式
+  const timestampRegex = /\[([^\]]*?)\]/g;
+  
+  function parseTimestamp(ts) {
+    // 支持 HH:MM:SS:mmm / MM:SS:mmm / SS:mmm 格式
+    const parts = ts.trim().split(":").map(s => s.trim());
+    if (parts.length < 2 || parts.length > 4) return null;
+
+    const msStr = parts[parts.length - 1];
+    const secStr = parts[parts.length - 2];
+    const minStr = parts.length >= 3 ? parts[parts.length - 3] : "0";
+    const hrStr = parts.length === 4 ? parts[0] : "0";
+
+    const ms = Number(msStr);
+    const sec = Number(secStr);
+    const min = Number(minStr);
+    const hr = Number(hrStr);
+    if (![ms, sec, min, hr].every(Number.isFinite)) return null;
+
+    return { hr, min, sec, ms };
+  }
+  
+  function formatTimestamp(parsedTs) {
+    if (!parsedTs) return null;
+    
+    const { hr, min, sec, ms } = parsedTs;
+    const HH = String(Math.max(0, hr)).padStart(2, "0");
+    const MM = String(Math.max(0, min)).padStart(2, "0");
+    const SS = String(Math.max(0, sec)).padStart(2, "0");
+    const mmm = String(Math.max(0, ms)).padStart(3, "0");
+    return `${HH}:${MM}:${SS}:${mmm}`;
+  }
+  
+  function addSecondsToParsedTimestamp(parsedTs, seconds) {
+    if (!parsedTs) return null;
+    
+    const { hr, min, sec, ms } = parsedTs;
+    const totalSeconds = hr * 3600 + min * 60 + sec + seconds;
+    const newH = Math.floor(totalSeconds / 3600);
+    const newM = Math.floor((totalSeconds % 3600) / 60);
+    const newS = Math.floor(totalSeconds % 60);
+    
+    return {
+      hr: newH,
+      min: newM,
+      sec: newS,
+      ms: ms // 毫秒部分保持不变
+    };
+  }
+  
+  return rawText.replace(timestampRegex, (match, timestampPart) => {
+    // 拆分开始时间和结束时间
+    const [startTime, endTime] = timestampPart.split('-');
+    if (!startTime || !endTime) return match; // 如果格式不正确，返回原字符串
+    
+    const parsedStart = parseTimestamp(startTime);
+    const parsedEnd = parseTimestamp(endTime);
+    
+    if (!parsedStart || !parsedEnd) return match; // 如果解析失败，返回原字符串
+    
+    // 添加偏移量
+    const adjustedStart = addSecondsToParsedTimestamp(parsedStart, offsetSeconds);
+    const adjustedEnd = addSecondsToParsedTimestamp(parsedEnd, offsetSeconds);
+    
+    if (!adjustedStart || !adjustedEnd) return match; // 如果调整失败，返回原字符串
+    
+    // 格式化调整后的时间戳
+    const formattedStart = formatTimestamp(adjustedStart);
+    const formattedEnd = formatTimestamp(adjustedEnd);
+    
+    if (!formattedStart || !formattedEnd) return match; // 如果格式化失败，返回原字符串
+    
+    return `[${formattedStart}-${formattedEnd}]`;
+  });
 }
 
 function downloadSrt() {
@@ -444,7 +608,7 @@ function downloadSrt() {
   const a = document.createElement("a");
   a.href = url;
   const name = file.value ? (file.value.name.replace(/\.[^/.]+$/, "") + ".srt") : "transcript.srt";
-    a.download = name;
+  a.download = name;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
