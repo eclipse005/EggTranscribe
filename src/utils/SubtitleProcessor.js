@@ -112,12 +112,21 @@ export class SubtitleProcessor {
     const minStr = parts.length >= 3 ? parts[parts.length - 3] : "0";
     const hrStr = parts.length === 4 ? parts[0] : "0";
 
-    const ms = Number(msStr);
+    let ms = Number(msStr);
     const sec = Number(secStr);
     const min = Number(minStr);
     const hr = Number(hrStr);
     
     if (![ms, sec, min, hr].every(Number.isFinite)) return null;
+
+    // 处理毫秒格式：如果是1-2位数字，需要补齐到3位
+    // 例如：60 -> 600, 5 -> 500, 123 -> 123
+    if (msStr.length === 1) {
+      ms = ms * 100; // 5 -> 500
+    } else if (msStr.length === 2) {
+      ms = ms * 10;  // 60 -> 600
+    }
+    // 3位数字保持不变
 
     const HH = String(Math.max(0, hr)).padStart(2, "0");
     const MM = String(Math.max(0, min)).padStart(2, "0");
@@ -143,12 +152,21 @@ export class SubtitleProcessor {
     const minStr = parts.length >= 3 ? parts[parts.length - 3] : "0";
     const hrStr = parts.length === 4 ? parts[0] : "0";
 
-    const ms = Number(msStr);
+    let ms = Number(msStr);
     const sec = Number(secStr);
     const min = Number(minStr);
     const hr = Number(hrStr);
     
     if (![ms, sec, min, hr].every(Number.isFinite)) return null;
+
+    // 处理毫秒格式：如果是1-2位数字，需要补齐到3位
+    // 例如：60 -> 600, 5 -> 500, 123 -> 123
+    if (msStr.length === 1) {
+      ms = ms * 100; // 5 -> 500
+    } else if (msStr.length === 2) {
+      ms = ms * 10;  // 60 -> 600
+    }
+    // 3位数字保持不变
 
     return { hr, min, sec, ms };
   }

@@ -89,8 +89,8 @@
       <div class="flex-1 flex gap-4">
         <select id="model" class="input flex-1" v-model="selectedModel">
           <option value="gemini-2.5-pro">Gemini 2.5 Pro (高精度)</option>
-          <option value="gemini-2.5-flash">Gemini 2.5 Flash (推荐)</option>
-          <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (快速)</option>
+          <option value="gemini-flash-latest">Gemini 2.5 Flash (推荐)</option>
+          <option value="gemini-flash-lite-latest">Gemini 2.5 Flash Lite (快速)</option>
           <option value="__custom__">自定义模型...</option>
         </select>
         <input
