@@ -14,7 +14,7 @@ export function useTranscription() {
   const showApiKey = ref(false);
   const statusTimeoutId = ref(null);
   const mediaTimeoutId = ref(null);
-  const selectedModel = ref("gemini-2.5-flash");
+  const selectedModel = ref("gemini-flash-latest");
   const customModel = ref("");
 
   // 常量
