@@ -193,7 +193,7 @@
                 <div class="flex gap-2 ml-2">
                   <button 
                     v-if="task.status === 'processing'"
-                    @click="resumeTask(task)" 
+                    @click="handleResumeTask(task)" 
                     class="btn btn-xs btn-primary"
                     :disabled="loading"
                     title="继续此转录任务"
@@ -201,7 +201,7 @@
                     继续
                   </button>
                   <button 
-                    @click="deleteTask(task)" 
+                    @click="handleDeleteTask(task)" 
                     class="btn btn-xs btn-error"
                     :disabled="loading"
                     title="删除此任务记录"
@@ -226,7 +226,7 @@
         
         <div class="p-4 border-t border-white/10 flex justify-end gap-3">
           <button 
-            @click="clearAllCaches" 
+            @click="handleClearAllCaches" 
             class="btn btn-xs btn-error"
             :disabled="loading || !cachedTasks || cachedTasks.length === 0"
           >
@@ -339,6 +339,27 @@ function formatModelName(model) {
 async function openCacheDialog() {
   showCacheDialog.value = true;
   // 打开对话框时立即加载缓存
+  await loadCachedTasks();
+}
+
+// 处理恢复任务
+async function handleResumeTask(task) {
+  await resumeTask(task);
+  // 恢复任务后重新加载缓存列表
+  await loadCachedTasks();
+}
+
+// 处理删除任务
+async function handleDeleteTask(task) {
+  await deleteTask(task);
+  // 删除任务后重新加载缓存列表
+  await loadCachedTasks();
+}
+
+// 处理清空所有缓存
+async function handleClearAllCaches() {
+  await clearAllCaches();
+  // 清空缓存后重新加载缓存列表
   await loadCachedTasks();
 }
 
