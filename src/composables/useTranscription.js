@@ -3,6 +3,7 @@ import { GoogleGenAI, createUserContent, createPartFromUri } from "@google/genai
 import { transcodeToMp316kMono, splitAudioBySilence, setProgressCallback, getCacheStatus, preloadFFmpeg } from "../lib/transcode";
 import { SubtitleProcessor } from "../utils/SubtitleProcessor";
 import { CacheManager } from "../utils/CacheManager";
+import { FileUtils } from "../utils/FileUtils";
 
 export function useTranscription() {
   // 响应式状态
@@ -15,6 +16,23 @@ export function useTranscription() {
   const showApiKey = ref(false);
   const statusTimeoutId = ref(null);
   const mediaTimeoutId = ref(null);
+
+  // 统一的定时器管理
+  const clearTimer = (timerId) => {
+    if (timerId.value) {
+      clearTimeout(timerId.value);
+      timerId.value = null;
+    }
+  };
+
+  const setStatusTimer = (message, delay = 2000) => {
+    clearTimer(statusTimeoutId);
+    status.value = message;
+    statusTimeoutId.value = setTimeout(() => {
+      status.value = "";
+      statusTimeoutId.value = null;
+    }, delay);
+  };
   const selectedModel = ref("gemini-flash-latest");
   const customModel = ref("");
 
@@ -33,35 +51,8 @@ export function useTranscription() {
 
   const fileMeta = computed(() => {
     if (!file.value) return "";
-    return formatBytes(file.value.size);
+    return FileUtils.formatBytes(file.value.size);
   });
-
-  // 工具函数
-  function formatBytes(bytes) {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B","KB","MB","GB","TB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-  }
-
-  function formatDuration(seconds) {
-    if (seconds === null || seconds === undefined) {
-      return "未知时长";
-    }
-    if (seconds === 0) {
-      return "0:00";
-    }
-    
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
-    
-    if (hours > 0) {
-      return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    }
-    return `${minutes}:${secs.toString().padStart(2, '0')}`;
-  }
 
   // 文件变更处理
   async function handleFileChange(f) {
@@ -71,91 +62,20 @@ export function useTranscription() {
     if (!f) return;
     
     // 获取文件时长信息（如果是音视频文件）
-    if (f.type.startsWith('audio/') || f.type.startsWith('video/')) {
-      try {
-        const url = URL.createObjectURL(f);
-        const media = document.createElement('audio'); // 统一使用 audio 元素
-        
-        // 清理之前的定时器
-        if (mediaTimeoutId.value) {
-          clearTimeout(mediaTimeoutId.value);
-          mediaTimeoutId.value = null;
-        }
-        
-        // 设置媒体元素属性
-        media.preload = 'metadata';
-        media.muted = true; // 静音避免播放声音
-        
-        // 设置超时处理
-        mediaTimeoutId.value = setTimeout(() => {
-          cleanup();
-          if (file.value === f) {
-            fileDuration.value = null;
-          }
-        }, 3000); // 减少到3秒超时
-        
-        const cleanup = () => {
-          if (mediaTimeoutId.value) {
-            clearTimeout(mediaTimeoutId.value);
-            mediaTimeoutId.value = null;
-          }
-          media.onloadedmetadata = null;
-          media.onerror = null;
-          media.removeAttribute('src');
-          media.load(); // 清空媒体元素
-          URL.revokeObjectURL(url);
-        };
-        
-        media.onloadedmetadata = () => {
-          if (file.value === f && media.duration && isFinite(media.duration)) {
-            fileDuration.value = media.duration;
-          } else {
-            fileDuration.value = null;
-          }
-          cleanup();
-        };
-        
-        media.onerror = () => {
-          if (file.value === f) {
-            fileDuration.value = null;
-          }
-          cleanup();
-        };
-        
-        // 设置 src 触发加载
-        media.src = url;
-        
-      } catch (error) {
-        console.warn('获取文件时长失败:', error);
-        if (file.value === f) {
-          fileDuration.value = null;
-        }
+    try {
+      const duration = await FileUtils.getMediaDuration(f);
+      if (file.value === f) {
+        fileDuration.value = duration;
+      }
+    } catch (error) {
+      console.warn('获取文件时长失败:', error);
+      if (file.value === f) {
+        fileDuration.value = null;
       }
     }
   }
 
-  // 生成文件唯一ID
-  function generateFileId(file, model) {
-    if (!file) {
-      console.error('generateFileId: file is null or undefined');
-      return null;
-    }
-    // 确保参数有效
-    if (!file.name || !model) {
-      console.error('generateFileId: missing required parameters', { fileName: file.name, model });
-      return null;
-    }
-    
-    try {
-      // 使用更安全的参数组合方式，避免特殊字符问题
-      const safeName = encodeURIComponent(file.name);
-      const safeModel = encodeURIComponent(model);
-      return `${safeName}_${file.size}_${file.lastModified}_${safeModel}`;
-    } catch (error) {
-      console.error('generateFileId: error creating ID', error);
-      return null;
-    }
-  }
+
 
   // 转录主函数
   async function transcribe(fileIdOverride = null, isResume = false) {
@@ -228,7 +148,7 @@ export function useTranscription() {
             );
 
         // 创建缓存记录，只包含音频片段和转录结果
-        actualFileId = generateFileId(file.value, effectiveModel.value);
+        actualFileId = FileUtils.generateFileId(file.value, effectiveModel.value);
         if (!actualFileId) {
           status.value = "生成文件ID失败";
           loading.value = false;
@@ -396,15 +316,7 @@ export function useTranscription() {
       }
     } finally {
       loading.value = false;
-      // 清理之前的状态定时器
-      if (statusTimeoutId.value) {
-        clearTimeout(statusTimeoutId.value);
-      }
-      // 添加新的状态清理定时器
-      statusTimeoutId.value = setTimeout(() => {
-        status.value = "";
-        statusTimeoutId.value = null;
-      }, 2000);
+      setStatusTimer("", 2000);
     }
   }
 
@@ -463,15 +375,7 @@ export function useTranscription() {
         status.value = "FFmpeg 预加载完成 ✨";
         
         // 3秒后清除状态信息
-        if (statusTimeoutId.value) {
-          clearTimeout(statusTimeoutId.value);
-        }
-        statusTimeoutId.value = setTimeout(() => {
-          if (status.value === "FFmpeg 预加载完成 ✨") {
-            status.value = "";
-          }
-          statusTimeoutId.value = null;
-        }, 3000);
+        setStatusTimer("FFmpeg 预加载完成 ✨", 3000);
       }
     } catch (error) {
       console.warn('FFmpeg 预加载失败:', error);
@@ -499,16 +403,8 @@ export function useTranscription() {
 
   // 组件卸载时清理定时器
   onUnmounted(() => {
-    // 清理 FFmpeg 状态定时器
-    if (statusTimeoutId.value) {
-      clearTimeout(statusTimeoutId.value);
-      statusTimeoutId.value = null;
-    }
-    // 清理媒体时长获取定时器
-    if (mediaTimeoutId.value) {
-      clearTimeout(mediaTimeoutId.value);
-      mediaTimeoutId.value = null;
-    }
+    clearTimer(statusTimeoutId);
+    clearTimer(mediaTimeoutId);
   });
 
   // 获取所有缓存任务
@@ -580,7 +476,7 @@ export function useTranscription() {
     fileMeta,
     
     // 方法
-    formatDuration,
+    formatDuration: FileUtils.formatDuration,
     handleFileChange,
     transcribe,
     downloadSrt,

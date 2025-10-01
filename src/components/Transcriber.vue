@@ -304,64 +304,43 @@ const cachedTasks = ref([]);
 let cacheRefreshInterval = null;
 
 // 文件变更事件处理
-function onFileChange(e) {
-  const f = e.target.files?.[0];
-  handleFileChange(f);
-}
+const onFileChange = (e) => handleFileChange(e.target.files?.[0]);
 
 // 获取缓存任务
-async function loadCachedTasks() {
+const loadCachedTasks = async () => {
   cachedTasks.value = await getCachedTasks();
-}
+};
 
 // 开始新的转录任务
-async function startTranscription() {
-  // 直接开始转录流程，不检查现有缓存
-  // 缓存只在分段后创建
-  await transcribe();
-}
+const startTranscription = () => transcribe();
 
 // 格式化模型名称
-function formatModelName(model) {
-  if (model.includes('pro')) {
-    return 'Pro';
-  } else if (model.includes('flash')) {
-    if (model.includes('lite')) {
-      return 'Lite';
-    }
-    return 'Flash';
-  }
-  // 如果不是这三个模型之一，返回原始名称
+const formatModelName = (model) => {
+  if (model.includes('pro')) return 'Pro';
+  if (model.includes('flash')) return model.includes('lite') ? 'Lite' : 'Flash';
   return model;
-}
+};
+
+// 缓存操作的统一处理函数
+const handleCacheOperation = async (operation, ...args) => {
+  await operation(...args);
+  await loadCachedTasks();
+};
 
 // 打开缓存对话框
-async function openCacheDialog() {
+const openCacheDialog = async () => {
   showCacheDialog.value = true;
-  // 打开对话框时立即加载缓存
   await loadCachedTasks();
-}
+};
 
 // 处理恢复任务
-async function handleResumeTask(task) {
-  await resumeTask(task);
-  // 恢复任务后重新加载缓存列表
-  await loadCachedTasks();
-}
+const handleResumeTask = (task) => handleCacheOperation(resumeTask, task);
 
 // 处理删除任务
-async function handleDeleteTask(task) {
-  await deleteTask(task);
-  // 删除任务后重新加载缓存列表
-  await loadCachedTasks();
-}
+const handleDeleteTask = (task) => handleCacheOperation(deleteTask, task);
 
 // 处理清空所有缓存
-async function handleClearAllCaches() {
-  await clearAllCaches();
-  // 清空缓存后重新加载缓存列表
-  await loadCachedTasks();
-}
+const handleClearAllCaches = () => handleCacheOperation(clearAllCaches);
 
 // 刷新缓存列表
 onMounted(() => {

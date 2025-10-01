@@ -103,9 +103,6 @@ class FFmpegUtils {
    */
   async transcodeToMp316kMono(inputFile) {
     const ffmpeg = await this.getFFmpeg();
-    // 在此操作期间绑定当前的进度回调
-    this._bindProgressCallback(ffmpeg);
-
     const ext = this.getFileExtension(inputFile?.name || 'input');
     const inputFS = `input.${ext}`;
     const outputFS = "output.mp3";
@@ -131,8 +128,6 @@ class FFmpegUtils {
       return { blob, name: `${baseName}.mp3`, mime: "audio/mpeg" };
     } finally {
       await this.cleanup([inputFS, outputFS]);
-      // 操作完成后，重新绑定当前的全局回调
-      this._bindProgressCallback(ffmpeg);
     }
   }
 
@@ -142,8 +137,6 @@ class FFmpegUtils {
   async transcodeToWav(audioFile, options = {}) {
     const { sampleRate = 16000, channels = 1, bitDepth = 16 } = options;
     const ffmpeg = await this.getFFmpeg();
-    // 在此操作期间绑定当前的进度回调
-    this._bindProgressCallback(ffmpeg);
     
     const inputFilename = `input.${this.getFileExtension(audioFile.name)}`;
     const outputFilename = 'output.wav';
@@ -163,8 +156,6 @@ class FFmpegUtils {
       return await ffmpeg.readFile(outputFilename);
     } finally {
       await this.cleanup([inputFilename, outputFilename]);
-      // 操作完成后，重新绑定当前的全局回调
-      this._bindProgressCallback(ffmpeg);
     }
   }
 
@@ -173,8 +164,6 @@ class FFmpegUtils {
    */
   async exec(args) {
     const ffmpeg = await this.getFFmpeg();
-    // 在此操作期间绑定当前的进度回调
-    this._bindProgressCallback(ffmpeg);
     return await ffmpeg.exec(args);
   }
 
@@ -183,8 +172,6 @@ class FFmpegUtils {
    */
   async writeFile(filename, data) {
     const ffmpeg = await this.getFFmpeg();
-    // 在此操作期间绑定当前的进度回调
-    this._bindProgressCallback(ffmpeg);
     await ffmpeg.writeFile(filename, data);
   }
 
@@ -193,8 +180,6 @@ class FFmpegUtils {
    */
   async readFile(filename) {
     const ffmpeg = await this.getFFmpeg();
-    // 在此操作期间绑定当前的进度回调
-    this._bindProgressCallback(ffmpeg);
     return await ffmpeg.readFile(filename);
   }
 
@@ -639,6 +624,7 @@ class FFmpegUtils {
   }
 
   getFileExtension(filename = '') {
+    // 导入 FileUtils 来使用统一的方法
     return filename.split('.').pop()?.toLowerCase() || 'bin';
   }
 
@@ -669,9 +655,7 @@ class FFmpegUtils {
     if (!ffmpeg) return;
     
     // 先解绑之前的进度回调，避免回调累积
-    if (this._boundProgressHandler) {
-      ffmpeg.off("progress", this._boundProgressHandler);
-    }
+    this._unbindProgressCallback(ffmpeg);
     
     if (this._progressCallback && typeof this._progressCallback === 'function') {
       // 创建一个新的处理函数
@@ -686,9 +670,6 @@ class FFmpegUtils {
       };
       
       ffmpeg.on("progress", this._boundProgressHandler);
-    } else {
-      // 如果没有回调函数，确保移除之前的监听器
-      this._boundProgressHandler = null;
     }
   }
 

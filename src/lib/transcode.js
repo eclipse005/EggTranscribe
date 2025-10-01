@@ -1,26 +1,5 @@
 import ffmpegUtils from './ffmpeg-utils.js';
-
-/**
- * 支持的音频格式，无需转码
- */
-const SUPPORTED_AUDIO_FORMATS = [
-  'audio/wav',
-  'audio/mp3', 
-  'audio/mpeg',  // MP3的另一种MIME类型
-  'audio/aiff',
-  'audio/aac',
-  'audio/ogg',
-  'audio/flac'
-];
-
-/**
- * 检查文件是否为支持的音频格式
- * @param {File|Blob} file 
- * @returns {boolean}
- */
-function isSupportedAudioFormat(file) {
-  return SUPPORTED_AUDIO_FORMATS.includes(file.type);
-}
+import { FileUtils } from '../utils/FileUtils.js';
 
 /**
  * 设置进度回调函数
@@ -51,12 +30,12 @@ export async function preloadFFmpeg() {
  */
 export async function transcodeToMp316kMono(inputFile) {
   // 检查是否为支持的音频格式
-  if (isSupportedAudioFormat(inputFile)) {
+  if (FileUtils.isSupportedAudioFormat(inputFile)) {
     console.log('文件已经是支持的音频格式，跳过转码:', inputFile.type);
     
     // 直接返回原文件（保持原始音频格式不变），只统一返回对象结构
     const baseName = inputFile?.name?.replace(/\.[^/.]+$/, "") || "audio";
-    const extension = inputFile.name?.split('.').pop() || 'audio';
+    const extension = FileUtils.getFileExtension(inputFile.name);
     
     return { 
       blob: inputFile,  // 原始文件，格式不变

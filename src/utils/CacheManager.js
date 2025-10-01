@@ -187,7 +187,14 @@ export class CacheManager {
         console.error('getCache error:', event.target.error);
         resolve(null); // 发生错误时返回 null 而不是拒绝
       };
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        const result = request.result;
+        if (result) {
+          resolve(this._processFromStorage(result));
+        } else {
+          resolve(null);
+        }
+      };
     });
   }
 
