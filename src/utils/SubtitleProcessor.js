@@ -6,6 +6,7 @@ export class SubtitleProcessor {
   /**
    * 将原始转录文本转换为SRT格式
    * 支持弹性时间戳解析：HH:MM:SS:mmm / MM:SS:mmm / SS:mmm
+   * 增加字幕时间重叠检查和修复功能
    * @param {string} rawText - 原始转录文本
    * @returns {string} SRT格式字幕
    */
@@ -16,9 +17,10 @@ export class SubtitleProcessor {
     // 匹配方括号中的起止时间，后接文本；时间部分格式弹性
     const re = /^\[(.+?)\-(.+?)\]\s*(.+)$/;
 
-    const out = [];
+    const subtitles = [];
     let idx = 1;
 
+    // 第一步：解析所有字幕
     for (const line of lines) {
       const m = re.exec(line);
       if (!m) continue;
@@ -28,8 +30,34 @@ export class SubtitleProcessor {
       const text = m[3];
       
       if (!start || !end) continue;
-      out.push(`${idx++}\n${start} --> ${end}\n${text}\n`);
+      
+      subtitles.push({
+        index: idx++,
+        start: start,
+        end: end,
+        text: text
+      });
     }
+
+    // 第二步：检查并修复时间重叠
+    for (let i = 0; i < subtitles.length - 1; i++) {
+      const current = subtitles[i];
+      const next = subtitles[i + 1];
+      
+      // 将时间戳转换为毫秒进行比较
+      const currentEndMs = this._timestampToMs(current.end);
+      const nextStartMs = this._timestampToMs(next.start);
+      
+      // 如果当前字幕结束时间大于下一个字幕开始时间，调整当前字幕结束时间
+      if (currentEndMs > nextStartMs) {
+        current.end = next.start;
+      }
+    }
+
+    // 第三步：生成SRT格式输出
+    const out = subtitles.map(subtitle => 
+      `${subtitle.index}\n${subtitle.start} --> ${subtitle.end}\n${subtitle.text}\n`
+    );
     
     // 若没有匹配，保留原文
     return out.length ? out.join("\n").trim() : rawText.trim();
@@ -211,6 +239,27 @@ export class SubtitleProcessor {
       sec: newS,
       ms: ms // 毫秒部分保持不变
     };
+  }
+
+  /**
+   * 将SRT格式时间戳转换为毫秒
+   * @private
+   * @param {string} timestamp - SRT格式时间戳 (HH:MM:SS,mmm)
+   * @returns {number} 毫秒数
+   */
+  static _timestampToMs(timestamp) {
+    if (!timestamp) return 0;
+    
+    // 匹配 HH:MM:SS,mmm 格式
+    const match = timestamp.match(/(\d{2}):(\d{2}):(\d{2}),(\d{3})/);
+    if (!match) return 0;
+    
+    const hours = parseInt(match[1]);
+    const minutes = parseInt(match[2]);
+    const seconds = parseInt(match[3]);
+    const milliseconds = parseInt(match[4]);
+    
+    return hours * 3600000 + minutes * 60000 + seconds * 1000 + milliseconds;
   }
 
   /**
