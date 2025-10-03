@@ -192,7 +192,7 @@
                 
                 <div class="flex gap-2 ml-2">
                   <button 
-                    v-if="task.status === 'processing'"
+                    v-if="task.status === 'processing' || task.status === 'error'"
                     @click="handleResumeTask(task)" 
                     class="btn btn-xs btn-primary"
                     :disabled="loading"
