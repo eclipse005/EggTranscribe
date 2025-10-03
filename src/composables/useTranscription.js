@@ -114,10 +114,17 @@ export function useTranscription() {
       // 在resume模式下，获取缓存数据
       if (isResume && fileIdOverride) {
         cache = await cacheManager.getCache(fileIdOverride);
-        if (cache && cache.status === 'processing') {
+        if (cache && (cache.status === 'processing' || cache.status === 'error')) {
           shouldResume = true;
           actualFileId = fileIdOverride;
           console.log(`从断点恢复任务: ${cache.fileName}`);
+          
+          // 如果是错误状态，重置为processing状态
+          if (cache.status === 'error') {
+            cache.status = 'processing';
+            cache.error = null;
+            await cacheManager.setCache(actualFileId, cache);
+          }
         } else {
           // 如果缓存不存在或已完成，则不是有效的resume请求
           status.value = "无法恢复任务，缓存不存在或已处理完毕";
@@ -419,12 +426,22 @@ export function useTranscription() {
 
   // 恢复特定任务
   async function resumeTask(task) {
-    if (!task || task.status !== 'processing') return;
+    if (!task || (task.status !== 'processing' && task.status !== 'error')) return;
     
     try {
       // 设置状态为继续处理
       status.value = `正在从断点恢复任务: ${task.fileName}`;
       loading.value = true;
+      
+      // 如果是错误状态的任务，先重置状态为processing
+      if (task.status === 'error') {
+        const cache = await cacheManager.getCache(task.id);
+        if (cache) {
+          cache.status = 'processing';
+          cache.error = null; // 清除之前的错误信息
+          await cacheManager.setCache(task.id, cache);
+        }
+      }
       
       // 重新执行转录流程，从缓存的分段开始
       await transcribe(task.id, true); // 传入任务ID和resume标志
